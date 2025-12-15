@@ -32,6 +32,7 @@ Processing pipeline for scans and behavioral files.
    # OR
    pip install -e python/
    ```
+   *Note: This pipeline depends on the `commons` package from the atlab organization. `requirements.txt` handles this automatically via git.*
 
 4. **Configuration:**
    Copy the example configuration file and fill in your database credentials.

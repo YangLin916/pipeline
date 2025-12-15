@@ -11,3 +11,4 @@ scikit-image
 scikit-learn
 datajoint
 streamlit
+git+https://github.com/atlab/commons.git#subdirectory=python
