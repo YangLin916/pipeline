@@ -2,14 +2,15 @@
 Settings for DataJoint.
 """
 import json
-from collections import OrderedDict
-from .exceptions import PipelineException
-import collections
+from collections import OrderedDict, defaultdict
+from collections.abc import MutableMapping, Mapping
 from pprint import pformat
+
+from .exceptions import PipelineException
 
 LOCALCONFIG = 'pipeline_config.json'
 GLOBALCONFIG = '.pipeline_config.json'
-validators = collections.defaultdict(lambda: lambda value: True)
+validators = defaultdict(lambda: lambda value: True)
 
 default = OrderedDict({
     'path.mounts': '/mnt/',
@@ -17,15 +18,14 @@ default = OrderedDict({
 })
 
 
-class Config(collections.MutableMapping):
-
+class Config(MutableMapping):
     instance = None
 
     def __init__(self, *args, **kwargs):
-            if not Config.instance:
-                Config.instance = Config.__Config(*args, **kwargs)
-            else:
-                Config.instance._conf.update(dict(*args, **kwargs))
+        if not Config.instance:
+            Config.instance = Config.__Config(*args, **kwargs)
+        else:
+            Config.instance._conf.update(dict(*args, **kwargs))
 
     def __getattr__(self, name):
         return getattr(self.instance, name)
@@ -51,7 +51,6 @@ class Config(collections.MutableMapping):
     def __len__(self):
         return len(self.instance._conf)
 
-
     class __Config:
         """
         Stores datajoint settings. Behaves like a dictionary, but applies validator functions
@@ -70,7 +69,7 @@ class Config(collections.MutableMapping):
             return self._conf[key]
 
         def __setitem__(self, key, value):
-            if isinstance(value, collections.Mapping):
+            if isinstance(value, Mapping):
                 raise ValueError("Nested settings are not supported!")
             if validators[key](value):
                 self._conf[key] = value

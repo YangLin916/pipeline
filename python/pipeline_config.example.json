@@ -1,0 +1,7 @@
+{
+    "path.mounts": "/mnt/",
+    "display.tracking": false,
+    "database.host": "db.example.com",
+    "database.user": "username",
+    "database.password": "password"
+}

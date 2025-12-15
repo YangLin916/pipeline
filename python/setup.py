@@ -23,7 +23,7 @@ setup(
 #                      'scikit-image', 'scikit-learn'],
     install_requires=['numpy', 'scipy', 'matplotlib', 'pandas', 'seaborn',
                       'imageio', 'imreg_dft', 'slacker', 'h5py',
-                      'scikit-image', 'scikit-learn'],
+                      'scikit-image', 'scikit-learn', 'datajoint', 'streamlit'],
 
     classifiers=[
         'Development Status :: 1 - Beta',
