@@ -14,6 +14,7 @@ class MouseInfo(dj.Manual):
     ---
     sex='U'                               : enum('M', 'F', 'U')        # M/F/Unknown for quick reference on the cage card
     dob = null                            : date                      # date of birth
+    name = null                           : varchar(64)               # optional nickname/alias
     line=''                               : varchar(128)              # strain or line name
     genotype=''                           : varchar(255)              # genotype details
     single_housing_date = null            : date                      # start of single housing (baseline days 1-3)
@@ -25,7 +26,7 @@ class MouseInfo(dj.Manual):
 
 
 @schema
-class DailyRestrictionLog(dj.Manual):
+class DailyLog(dj.Manual):
     definition = """ # daily weight and water intake log for water-restricted mice
 
     -> MouseInfo
@@ -38,9 +39,20 @@ class DailyRestrictionLog(dj.Manual):
     weight_delta_from_baseline_g = null : decimal(6,3)                  # weight change vs baseline (current - baseline)
     bottle_weight_before_g = null       : decimal(7,3)                  # Drinko bottle weight before adding water (retrieval weight)
     bottle_weight_after_g = null        : decimal(7,3)                  # Drinko bottle weight after adding water (refill weight)
-    water_added_ml = null               : decimal(6,3)                  # amount of water added (ml), including dish deliveries
-    supplemental_water_ml = 0           : decimal(6,3)                  # extra water given (e.g. syringe/gavage)
-    water_consumed_ml = null            : decimal(6,3)                  # calculated intake (bottle delta + supplemental)
+    water_added_ml = null               : decimal(6,3)                  # amount of water added (ml) to bottle
+    
+    # Task specific
+    task = null                         : varchar(128)                  # task name (e.g. SoundDetection) or null if no task
+    task_duration_min = null            : smallint                      # duration of task in minutes
+    total_trials = null                 : smallint                      # total trials performed
+    correct_trials = null               : smallint                      # number of correct trials
+    correct_rate = null                 : decimal(5,2)                  # correct / total (0-100 or 0-1)
+    reward_size_ul = null               : decimal(5,2)                  # reward size in microliters
+    task_water_ml = 0                   : decimal(6,3)                  # water consumed during task
+    
+    remain_water_ml = null              : decimal(6,3)                  # target_water - task_water (how much more needed)
+    
+    water_consumed_ml = null            : decimal(6,3)                  # calculated intake (bottle delta + task_water)
     target_water_ml = null              : decimal(6,3)                  # allowance based on baseline weight * 50 ml/kg
     minimum_water_ml = null             : decimal(6,3)                  # minimum allowance based on 25 ml/kg rule
     removed_from_restriction = 0        : boolean                       # mark if mouse taken off restriction today
@@ -51,7 +63,10 @@ class DailyRestrictionLog(dj.Manual):
     @staticmethod
     def compute_daily_log(animal_id, log_date, body_weight_g,
                           bottle_weight_before_g, bottle_weight_after_g,
-                          water_added_ml, supplemental_water_ml=0,
+                          water_added_ml, 
+                          task=None, task_duration_min=None, 
+                          total_trials=None, correct_trials=None, 
+                          reward_size_ul=None, task_water_ml=0,
                           username='', health_status='5', notes=''):
         """
         Helper method to compute derived fields for a daily log entry.
@@ -69,16 +84,30 @@ class DailyRestrictionLog(dj.Manual):
         target_water_ml = baseline_weight * 0.05
         minimum_water_ml = baseline_weight * 0.025
 
-        # Calculate consumption (requires previous day's bottle_weight_after)
-        # We look for the most recent log before this date
-        prev_logs = (DailyRestrictionLog & {'animal_id': animal_id} & f'log_date < "{log_date}"').fetch(
-            'bottle_weight_after_g', order_by='log_date DESC', limit=1)
+        # Task Calculations
+        correct_rate = None
+        remain_water_ml = None
         
-        water_consumed_ml = None
-        if len(prev_logs) > 0:
-            prev_after = float(prev_logs[0])
-            water_consumed_ml = (prev_after - bottle_weight_before_g) + supplemental_water_ml
+        # Ensure task_water_ml is float for calculation
+        if task_water_ml is None:
+            task_water_ml = 0.0
+        else:
+            task_water_ml = float(task_water_ml)
+            
+        if task and total_trials and total_trials > 0:
+            if correct_trials is not None:
+                correct_rate = float(correct_trials) / float(total_trials)
+        
+        # Remain water = Target - Task Water
+        remain_water_ml = target_water_ml - task_water_ml
 
+        # Water Consumed can only be calculated the NEXT day (retrospective)
+        # So for the current log, it remains None.
+        water_consumed_ml = None
+        
+        # Handle None conversions for DB
+        if correct_rate is None: correct_rate = 0.0
+        
         return dict(
             animal_id=animal_id,
             log_date=log_date,
@@ -90,11 +119,47 @@ class DailyRestrictionLog(dj.Manual):
             bottle_weight_before_g=bottle_weight_before_g,
             bottle_weight_after_g=bottle_weight_after_g,
             water_added_ml=water_added_ml,
-            supplemental_water_ml=supplemental_water_ml,
-            water_consumed_ml=water_consumed_ml,  # calculated
+            
+            task=task,
+            task_duration_min=task_duration_min,
+            total_trials=total_trials,
+            correct_trials=correct_trials,
+            correct_rate=correct_rate,
+            reward_size_ul=reward_size_ul,
+            task_water_ml=task_water_ml,
+            remain_water_ml=remain_water_ml,
+            
+            water_consumed_ml=water_consumed_ml,
             target_water_ml=target_water_ml,
             minimum_water_ml=minimum_water_ml,
             removed_from_restriction=0,
             health_status=health_status,
             notes=notes
         )
+
+    @staticmethod
+    def update_previous_consumption(animal_id, current_date, current_bottle_before_g):
+        """
+        Updates the water_consumed_ml for the previous day's log based on today's bottle retrieval.
+        """
+        # Find the most recent log before today
+        key = {'animal_id': animal_id}
+        prev_log = (DailyLog & key & f'log_date < "{current_date}"').fetch(
+            'log_date', 'bottle_weight_after_g', 'task_water_ml', 
+            order_by='log_date DESC', limit=1, as_dict=True)
+            
+        if prev_log:
+            prev = prev_log[0]
+            prev_date = prev['log_date']
+            prev_after = float(prev['bottle_weight_after_g']) if prev['bottle_weight_after_g'] else 0.0
+            prev_task = float(prev['task_water_ml']) if prev['task_water_ml'] else 0.0
+            
+            # Consumption = (YesterdayAfter - TodayBefore) + YesterdayTask
+            bottle_consumed = max(0, prev_after - float(current_bottle_before_g))
+            total_consumed = bottle_consumed + prev_task
+            
+            # Update the record
+            dj.Table._update(DailyLog & key & {'log_date': prev_date}, 'water_consumed_ml', total_consumed)
+            return True, prev_date, total_consumed
+            
+        return False, None, 0.0
