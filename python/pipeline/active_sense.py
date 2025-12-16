@@ -163,3 +163,19 @@ class DailyLog(dj.Manual):
             return True, prev_date, total_consumed
             
         return False, None, 0.0
+
+
+@schema
+class WaterCalibration(dj.Manual):
+    definition = """
+    setup             : varchar(64)   # e.g. "Box 1", "Rig 2"
+    calibration_id    : int           # repeat number (1-based index for this setup)
+    ---
+    -> experiment.Person
+    calibration_time  : datetime      # timestamp of calibration
+    pump_time_ms      : int           # duration in ms
+    continuous_rate_hz: decimal(5,2)  # pump frequency in Hz
+    number_of_pulses  : int           # number of pulses delivered
+    total_water_ml    : decimal(5,3)  # measured output in ml
+    notes=''          : varchar(1024) # comments
+    """

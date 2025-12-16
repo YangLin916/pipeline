@@ -33,7 +33,7 @@ except Exception as e:
 from pipeline import active_sense, mice
 
 # --- Tabs ---
-tab_log, tab_new = st.tabs(["📝 Daily Log", "➕ New Subject"])
+tab_log, tab_new, tab_calib = st.tabs(["📝 Daily Log", "➕ New Subject", "💧 Water Calibration"])
 
 # ==========================================
 # TAB 1: DAILY LOG
@@ -380,3 +380,88 @@ with tab_new:
                     st.info("Refresh to see in Daily Log.")
                 except Exception as e:
                     st.error(f"Error creating: {e}")
+
+# ==========================================
+# TAB 3: WATER CALIBRATION
+# ==========================================
+with tab_calib:
+    st.header("Water Calibration Log")
+    
+    # 1. Input Form
+    with st.expander("➕ Add New Calibration", expanded=True):
+        col1, col2 = st.columns(2)
+        setup_name = col1.text_input("Setup Name", value="Box 1", help="e.g. Box 1, Rig 2")
+        calib_user = col2.text_input("Experimenter", value="yang")
+        
+        # Auto-calculate Repeat ID based on Setup
+        repeat_id = 1
+        if setup_name:
+            try:
+                # Find max calibration_id for this setup
+                existing_ids = (active_sense.WaterCalibration & f'setup="{setup_name}"').fetch('calibration_id')
+                if len(existing_ids) > 0:
+                    repeat_id = max(existing_ids) + 1
+            except:
+                pass
+        
+        st.info(f"🔢 Next Calibration ID for **{setup_name}**: **{repeat_id}**")
+        
+        with st.form("water_calib_form", enter_to_submit=False):
+            st.subheader("Pump Parameters")
+            c1, c2, c3 = st.columns(3)
+            pump_time = c1.number_input("Pump Time (ms)", min_value=0, step=10, value=150)
+            cont_rate = c2.number_input("Continuous Rate (Hz)", min_value=0.0, step=1.0, value=20.0, format="%.2f")
+            pulses = c3.number_input("Number of Pulses", min_value=1, step=1, value=100)
+            
+            st.subheader("Measurement")
+            note_col, water_col = st.columns([2, 1])
+            notes = note_col.text_area("Notes", placeholder="e.g. 500 pulses total, measured with cylinder...")
+            total_water = water_col.number_input("Total Water Measured (ml)", min_value=0.0, format="%.3f", step=0.05)
+            
+            submit_calib = st.form_submit_button("💾 Save Calibration")
+            
+            if submit_calib:
+                try:
+                    active_sense.WaterCalibration.insert1(dict(
+                        setup=setup_name,
+                        calibration_id=repeat_id,
+                        username=calib_user,
+                        calibration_time=datetime.datetime.now(),
+                        pump_time_ms=pump_time,
+                        continuous_rate_hz=cont_rate,
+                        number_of_pulses=pulses,
+                        total_water_ml=total_water,
+                        notes=notes
+                    ))
+                    st.success(f"Saved calibration #{repeat_id} for {setup_name}!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving calibration: {e}")
+
+    # 2. History
+    st.markdown("---")
+    st.subheader("📜 Calibration History")
+    
+    # Filter by setup
+    all_setups = ["All"]
+    try:
+        db_setups = (active_sense.WaterCalibration).fetch('setup')
+        if len(db_setups) > 0:
+            all_setups += sorted(list(set(db_setups)))
+    except:
+        pass
+        
+    filter_setup = st.selectbox("Filter by Setup", all_setups)
+    
+    try:
+        if filter_setup == "All":
+            calib_history = active_sense.WaterCalibration.fetch(format="frame", order_by="calibration_time DESC", limit=20).reset_index()
+        else:
+            calib_history = (active_sense.WaterCalibration & f'setup="{filter_setup}"').fetch(format="frame", order_by="calibration_time DESC", limit=20).reset_index()
+            
+        if not calib_history.empty:
+            st.dataframe(calib_history[['calibration_time', 'setup', 'calibration_id', 'username', 'pump_time_ms', 'total_water_ml', 'notes']])
+        else:
+            st.info("No calibration records found.")
+    except Exception as e:
+        st.warning(f"Could not fetch history (Table might be empty or missing): {e}")
