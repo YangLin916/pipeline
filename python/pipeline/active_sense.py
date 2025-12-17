@@ -176,6 +176,7 @@ class WaterCalibration(dj.Manual):
     pump_time_ms      : int           # duration in ms
     continuous_rate_hz: decimal(5,2)  # pump frequency in Hz
     number_of_pulses  : int           # number of pulses delivered
-    total_water_ml    : decimal(5,3)  # measured output in ml
+    water_left_ml     : decimal(5,3)  # measured output Left in ml
+    water_right_ml    : decimal(5,3)  # measured output Right in ml
     notes=''          : varchar(1024) # comments
     """

@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
 import datetime
+import time
+import numpy as np
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 import datajoint as dj
 
 # --- Database Configuration ---
@@ -414,9 +418,10 @@ with tab_calib:
             pulses = c3.number_input("Number of Pulses", min_value=1, step=1, value=100)
             
             st.subheader("Measurement")
-            note_col, water_col = st.columns([2, 1])
+            note_col, water_c1, water_c2 = st.columns([2, 1, 1])
             notes = note_col.text_area("Notes", placeholder="e.g. 500 pulses total, measured with cylinder...")
-            total_water = water_col.number_input("Total Water Measured (ml)", min_value=0.0, format="%.3f", step=0.05)
+            water_left = water_c1.number_input("Left Volume (ml)", min_value=0.0, format="%.3f", step=0.05)
+            water_right = water_c2.number_input("Right Volume (ml)", min_value=0.0, format="%.3f", step=0.05)
             
             submit_calib = st.form_submit_button("💾 Save Calibration")
             
@@ -430,7 +435,8 @@ with tab_calib:
                         pump_time_ms=pump_time,
                         continuous_rate_hz=cont_rate,
                         number_of_pulses=pulses,
-                        total_water_ml=total_water,
+                        water_left_ml=water_left,
+                        water_right_ml=water_right,
                         notes=notes
                     ))
                     st.success(f"Saved calibration #{repeat_id} for {setup_name}!")
@@ -460,8 +466,92 @@ with tab_calib:
             calib_history = (active_sense.WaterCalibration & f'setup="{filter_setup}"').fetch(format="frame", order_by="calibration_time DESC", limit=20).reset_index()
             
         if not calib_history.empty:
-            st.dataframe(calib_history[['calibration_time', 'setup', 'calibration_id', 'username', 'pump_time_ms', 'total_water_ml', 'notes']])
+            st.dataframe(calib_history[['calibration_time', 'setup', 'calibration_id', 'username', 'pump_time_ms', 'water_left_ml', 'water_right_ml', 'notes']])
         else:
             st.info("No calibration records found.")
     except Exception as e:
         st.warning(f"Could not fetch history (Table might be empty or missing): {e}")
+
+    # 3. Analysis & Calculator
+    st.markdown("---")
+    with st.expander("📈 Calibration Analysis & Calculator", expanded=False):
+        if filter_setup != "All":
+            # Fetch data for this setup
+            try:
+                df_calib = (active_sense.WaterCalibration & f'setup="{filter_setup}"').fetch(format="frame").reset_index()
+                
+                if len(df_calib) > 2:
+                    # Function to fit: Time = m * Volume + c
+                    def func_linear(x, m, c):
+                        return m * x + c
+
+                    x_left = df_calib['water_left_ml'].values.astype(float)
+                    x_right = df_calib['water_right_ml'].values.astype(float)
+                    y_time = df_calib['pump_time_ms'].values.astype(float)
+
+                    # Fit Left
+                    try:
+                        popt_l, _ = curve_fit(func_linear, x_left, y_time)
+                        m_l, c_l = popt_l
+                        valid_l = True
+                    except:
+                        valid_l = False
+                    
+                    # Fit Right
+                    try:
+                        popt_r, _ = curve_fit(func_linear, x_right, y_time)
+                        m_r, c_r = popt_r
+                        valid_r = True
+                    except:
+                        valid_r = False
+
+                    # Calculator UI
+                    st.subheader("💧 Reward Calculator")
+                    target_vol_ul = st.number_input("Target Reward Size (µl)", value=5.0, step=0.5)
+                    target_vol_ml = target_vol_ul / 1000.0
+                    
+                    col_res1, col_res2 = st.columns(2)
+                    
+                    if valid_l:
+                        req_time_l = func_linear(target_vol_ml, *popt_l)
+                        col_res1.success(f"**Left Port**: {req_time_l:.1f} ms")
+                        col_res1.caption(f"Fit: T = {m_l:.1f}*V + {c_l:.1f}")
+                    else:
+                        col_res1.warning("Left: Not enough data to fit")
+
+                    if valid_r:
+                        req_time_r = func_linear(target_vol_ml, *popt_r)
+                        col_res2.success(f"**Right Port**: {req_time_r:.1f} ms")
+                        col_res2.caption(f"Fit: T = {m_r:.1f}*V + {c_r:.1f}")
+                    else:
+                        col_res2.warning("Right: Not enough data to fit")
+
+                    # plotting
+                    st.subheader("Curve Fit")
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    
+                    # Plot raw data
+                    ax.scatter(x_left, y_time, color='blue', label='Left Data', alpha=0.6)
+                    ax.scatter(x_right, y_time, color='red', label='Right Data', alpha=0.6)
+                    
+                    # Plot fits
+                    x_plot = np.linspace(0, max(x_left.max(), x_right.max()) * 1.1, 50)
+                    if valid_l:
+                        ax.plot(x_plot, func_linear(x_plot, *popt_l), 'b--', alpha=0.5, label='Left Fit')
+                    if valid_r:
+                        ax.plot(x_plot, func_linear(x_plot, *popt_r), 'r--', alpha=0.5, label='Right Fit')
+                        
+                    ax.set_xlabel('Water Volume (ml)')
+                    ax.set_ylabel('Pump Time (ms)')
+                    ax.legend()
+                    ax.grid(True, linestyle=':', alpha=0.6)
+                    
+                    st.pyplot(fig)
+                    plt.close(fig) # Close to avoid memory leaks
+                    
+                else:
+                    st.warning("Need at least 3 data points for this setup to perform analysis.")
+            except Exception as e:
+                st.error(f"Analysis Error: {e}")
+        else:
+            st.info("Please select a specific 'Setup' filter above to enable analysis.")
