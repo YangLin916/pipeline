@@ -170,10 +170,10 @@ class WaterCalibration(dj.Manual):
     definition = """
     setup             : varchar(64)   # e.g. "Box 1", "Rig 2"
     calibration_id    : int           # repeat number (1-based index for this setup)
+    pump_time_ms      : int           # duration in ms
     ---
     -> experiment.Person
     calibration_time  : datetime      # timestamp of calibration
-    pump_time_ms      : int           # duration in ms
     continuous_rate_hz: decimal(5,2)  # pump frequency in Hz
     number_of_pulses  : int           # number of pulses delivered
     water_left_ml     : decimal(5,3)  # measured output Left in ml

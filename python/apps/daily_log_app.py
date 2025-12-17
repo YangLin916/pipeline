@@ -392,23 +392,34 @@ with tab_calib:
     st.header("Water Calibration Log")
     
     # 1. Input Form
-    with st.expander("➕ Add New Calibration", expanded=True):
+    with st.expander("➕ Add New Calibration Point", expanded=True):
         col1, col2 = st.columns(2)
         setup_name = col1.text_input("Setup Name", value="teensy_2v", help="e.g. Box 1, Rig 2")
         calib_user = col2.text_input("Experimenter", value="yang")
         
-        # Auto-calculate Repeat ID based on Setup
-        repeat_id = 1
+        # Logic for Session ID (Repeat ID)
+        current_max_id = 0
         if setup_name:
             try:
                 # Find max calibration_id for this setup
                 existing_ids = (active_sense.WaterCalibration & f'setup="{setup_name}"').fetch('calibration_id')
                 if len(existing_ids) > 0:
-                    repeat_id = max(existing_ids) + 1
+                    current_max_id = max(existing_ids)
             except:
                 pass
         
-        st.info(f"🔢 Next Calibration ID for **{setup_name}**: **{repeat_id}**")
+        # Default to 1 if no history, else default to current_max_id (appending to session)
+        base_id = max(1, current_max_id)
+        
+        c_mode = st.radio("Session Mode", ["Add to Current Session", "Start New Session"], horizontal=True)
+        
+        if c_mode == "Start New Session":
+            # If there is history, increment. If history is empty (0), still start at 1.
+            repeat_id = current_max_id + 1 if current_max_id > 0 else 1
+        else:
+            repeat_id = base_id
+
+        st.info(f"🔢 Protocol: **{setup_name}** | Session ID: **{repeat_id}**")
         
         with st.form("water_calib_form", enter_to_submit=False):
             st.subheader("Pump Parameters")
@@ -423,23 +434,23 @@ with tab_calib:
             water_left = water_c1.number_input("Left Volume (ml)", min_value=0.0, format="%.3f", step=0.05)
             water_right = water_c2.number_input("Right Volume (ml)", min_value=0.0, format="%.3f", step=0.05)
             
-            submit_calib = st.form_submit_button("💾 Save Calibration")
+            submit_calib = st.form_submit_button("💾 Save Point")
             
             if submit_calib:
                 try:
                     active_sense.WaterCalibration.insert1(dict(
                         setup=setup_name,
                         calibration_id=repeat_id,
+                        pump_time_ms=pump_time,
                         username=calib_user,
                         calibration_time=datetime.datetime.now(),
-                        pump_time_ms=pump_time,
                         continuous_rate_hz=cont_rate,
                         number_of_pulses=pulses,
                         water_left_ml=water_left,
                         water_right_ml=water_right,
                         notes=notes
                     ))
-                    st.success(f"Saved calibration #{repeat_id} for {setup_name}!")
+                    st.success(f"Saved point (Time={pump_time}) to Session #{repeat_id}!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error saving calibration: {e}")
@@ -466,7 +477,7 @@ with tab_calib:
             calib_history = (active_sense.WaterCalibration & f'setup="{filter_setup}"').fetch(format="frame", order_by="calibration_time DESC", limit=20).reset_index()
             
         if not calib_history.empty:
-            st.dataframe(calib_history[['calibration_time', 'setup', 'calibration_id', 'username', 'pump_time_ms', 'water_left_ml', 'water_right_ml', 'notes']])
+            st.dataframe(calib_history[['calibration_time', 'setup', 'calibration_id', 'pump_time_ms', 'water_left_ml', 'water_right_ml', 'notes']])
         else:
             st.info("No calibration records found.")
     except Exception as e:
@@ -476,82 +487,95 @@ with tab_calib:
     st.markdown("---")
     with st.expander("📈 Calibration Analysis & Calculator", expanded=False):
         if filter_setup != "All":
-            # Fetch data for this setup
+            # Select specific session ID for this setup
             try:
-                df_calib = (active_sense.WaterCalibration & f'setup="{filter_setup}"').fetch(format="frame").reset_index()
+                # Get unique session IDs for this setup
+                unique_ids = (active_sense.WaterCalibration & f'setup="{filter_setup}"').fetch('calibration_id')
+                unique_ids = sorted(list(set(unique_ids)), reverse=True) # Latest first
                 
-                if len(df_calib) > 2:
-                    # Function to fit: Time = m * Volume + c
-                    def func_linear(x, m, c):
-                        return m * x + c
-
-                    x_left = df_calib['water_left_ml'].values.astype(float)
-                    x_right = df_calib['water_right_ml'].values.astype(float)
-                    y_time = df_calib['pump_time_ms'].values.astype(float)
-
-                    # Fit Left
-                    try:
-                        popt_l, _ = curve_fit(func_linear, x_left, y_time)
-                        m_l, c_l = popt_l
-                        valid_l = True
-                    except:
-                        valid_l = False
-                    
-                    # Fit Right
-                    try:
-                        popt_r, _ = curve_fit(func_linear, x_right, y_time)
-                        m_r, c_r = popt_r
-                        valid_r = True
-                    except:
-                        valid_r = False
-
-                    # Calculator UI
-                    st.subheader("💧 Reward Calculator")
-                    target_vol_ul = st.number_input("Target Reward Size (µl)", value=5.0, step=0.5)
-                    target_vol_ml = target_vol_ul / 1000.0
-                    
-                    col_res1, col_res2 = st.columns(2)
-                    
-                    if valid_l:
-                        req_time_l = func_linear(target_vol_ml, *popt_l)
-                        col_res1.success(f"**Left Port**: {req_time_l:.1f} ms")
-                        col_res1.caption(f"Fit: T = {m_l:.1f}*V + {c_l:.1f}")
-                    else:
-                        col_res1.warning("Left: Not enough data to fit")
-
-                    if valid_r:
-                        req_time_r = func_linear(target_vol_ml, *popt_r)
-                        col_res2.success(f"**Right Port**: {req_time_r:.1f} ms")
-                        col_res2.caption(f"Fit: T = {m_r:.1f}*V + {c_r:.1f}")
-                    else:
-                        col_res2.warning("Right: Not enough data to fit")
-
-                    # plotting
-                    st.subheader("Curve Fit")
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    
-                    # Plot raw data
-                    ax.scatter(x_left, y_time, color='blue', label='Left Data', alpha=0.6)
-                    ax.scatter(x_right, y_time, color='red', label='Right Data', alpha=0.6)
-                    
-                    # Plot fits
-                    x_plot = np.linspace(0, max(x_left.max(), x_right.max()) * 1.1, 50)
-                    if valid_l:
-                        ax.plot(x_plot, func_linear(x_plot, *popt_l), 'b--', alpha=0.5, label='Left Fit')
-                    if valid_r:
-                        ax.plot(x_plot, func_linear(x_plot, *popt_r), 'r--', alpha=0.5, label='Right Fit')
-                        
-                    ax.set_xlabel('Water Volume (ml)')
-                    ax.set_ylabel('Pump Time (ms)')
-                    ax.legend()
-                    ax.grid(True, linestyle=':', alpha=0.6)
-                    
-                    st.pyplot(fig)
-                    plt.close(fig) # Close to avoid memory leaks
-                    
+                if not unique_ids:
+                     st.info("No data available for analysis.")
                 else:
-                    st.warning("Need at least 3 data points for this setup to perform analysis.")
+                    selected_session = st.selectbox("Select Session (Repeat ID)", unique_ids)
+                    
+                    # Fetch data for this SPECIFIC session
+                    df_calib = (active_sense.WaterCalibration & f'setup="{filter_setup}"' & f'calibration_id={selected_session}').fetch(format="frame").reset_index()
+                    
+                    if len(df_calib) >= 2:
+                        st.caption(f"Analyzing {len(df_calib)} points from Session {selected_session}...")
+                        
+                        # Function to fit: Time = m * Volume + c
+                        def func_linear(x, m, c):
+                            return m * x + c
+
+                        x_left = df_calib['water_left_ml'].values.astype(float)
+                        x_right = df_calib['water_right_ml'].values.astype(float)
+                        y_time = df_calib['pump_time_ms'].values.astype(float)
+
+                        # Fit Left
+                        try:
+                            popt_l, _ = curve_fit(func_linear, x_left, y_time)
+                            m_l, c_l = popt_l
+                            valid_l = True
+                        except:
+                            valid_l = False
+                        
+                        # Fit Right
+                        try:
+                            popt_r, _ = curve_fit(func_linear, x_right, y_time)
+                            m_r, c_r = popt_r
+                            valid_r = True
+                        except:
+                            valid_r = False
+
+                        # Calculator UI
+                        st.subheader("💧 Reward Calculator")
+                        target_vol_ul = st.number_input("Target Reward Size (µl)", value=5.0, step=0.5)
+                        target_vol_ml = target_vol_ul / 1000.0
+                        
+                        col_res1, col_res2 = st.columns(2)
+                        
+                        if valid_l:
+                            req_time_l = func_linear(target_vol_ml, *popt_l)
+                            col_res1.success(f"**Left Port**: {req_time_l:.1f} ms")
+                            col_res1.caption(f"Fit: T = {m_l:.1f}*V + {c_l:.1f}")
+                        else:
+                            col_res1.warning("Left: Not enough data")
+
+                        if valid_r:
+                            req_time_r = func_linear(target_vol_ml, *popt_r)
+                            col_res2.success(f"**Right Port**: {req_time_r:.1f} ms")
+                            col_res2.caption(f"Fit: T = {m_r:.1f}*V + {c_r:.1f}")
+                        else:
+                            col_res2.warning("Right: Not enough data")
+
+                        # plotting
+                        st.subheader("Curve Fit")
+                        fig, ax = plt.subplots(figsize=(6, 4))
+                        
+                        # Plot raw data
+                        ax.scatter(x_left, y_time, color='blue', label='Left Data', alpha=0.6)
+                        ax.scatter(x_right, y_time, color='red', label='Right Data', alpha=0.6)
+                        
+                        # Plot fits
+                        x_plot = np.linspace(0, max(x_left.max(), x_right.max()) * 1.1, 50)
+                        if valid_l:
+                            ax.plot(x_plot, func_linear(x_plot, *popt_l), 'b--', alpha=0.5, label='Left Fit')
+                        if valid_r:
+                            ax.plot(x_plot, func_linear(x_plot, *popt_r), 'r--', alpha=0.5, label='Right Fit')
+                            
+                        ax.set_xlabel('Water Volume (ml)')
+                        ax.set_ylabel('Pump Time (ms)')
+                        ax.legend()
+                        ax.grid(True, linestyle=':', alpha=0.6)
+                        
+                        st.pyplot(fig)
+                        plt.close(fig) # Close to avoid memory leaks
+                        
+                    else:
+                        st.warning("Need at least 2 data points in this session to perform line fit.")
             except Exception as e:
                 st.error(f"Analysis Error: {e}")
         else:
             st.info("Please select a specific 'Setup' filter above to enable analysis.")
+
