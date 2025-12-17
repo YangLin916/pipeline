@@ -394,7 +394,7 @@ with tab_calib:
     # 1. Input Form
     with st.expander("➕ Add New Calibration", expanded=True):
         col1, col2 = st.columns(2)
-        setup_name = col1.text_input("Setup Name", value="Box 1", help="e.g. Box 1, Rig 2")
+        setup_name = col1.text_input("Setup Name", value="teensy_2v", help="e.g. Box 1, Rig 2")
         calib_user = col2.text_input("Experimenter", value="yang")
         
         # Auto-calculate Repeat ID based on Setup
@@ -413,8 +413,8 @@ with tab_calib:
         with st.form("water_calib_form", enter_to_submit=False):
             st.subheader("Pump Parameters")
             c1, c2, c3 = st.columns(3)
-            pump_time = c1.number_input("Pump Time (ms)", min_value=0, step=10, value=150)
-            cont_rate = c2.number_input("Continuous Rate (Hz)", min_value=0.0, step=1.0, value=20.0, format="%.2f")
+            pump_time = c1.number_input("Pump Time (ms)", min_value=0, step=10, value=50)
+            cont_rate = c2.number_input("Continuous Rate (Hz)", min_value=0.0, step=1.0, value=2.0, format="%.2f")
             pulses = c3.number_input("Number of Pulses", min_value=1, step=1, value=100)
             
             st.subheader("Measurement")
