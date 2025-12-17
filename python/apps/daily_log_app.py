@@ -284,7 +284,7 @@ with tab_new:
         known_dob = found_mouse.get('dob', datetime.date.today())
         
         # When found, we skip generating a "create mouse" step and go straight to enrollment with manual extras
-        with st.form("enroll_existing_form", enter_to_submit=False):
+        with st.form("enroll_existing_form"):
             st.write(f"**Sex:** {known_sex}")
             st.write(f"**DOB:** {known_dob}")
             
@@ -327,7 +327,7 @@ with tab_new:
     elif check_animal_id:
         st.warning(f"⚠️ **{check_animal_id}** not found. Please enter FULL details to create it.")
         
-        with st.form("create_full_form", enter_to_submit=False):
+        with st.form("create_full_form"):
             st.subheader("Basic Info")
             c1, c2, c3 = st.columns(3)
             sex = c1.selectbox("Sex", ["M", "F", "U"])
@@ -421,7 +421,7 @@ with tab_calib:
 
         st.info(f"🔢 Protocol: **{setup_name}** | Session ID: **{repeat_id}**")
         
-        with st.form("water_calib_form", enter_to_submit=False):
+        with st.form("water_calib_form"):
             st.subheader("Pump Parameters")
             c1, c2, c3 = st.columns(3)
             pump_time = c1.number_input("Pump Time (ms)", min_value=0, step=10, value=50)
@@ -508,8 +508,9 @@ with tab_calib:
                         def func_linear(x, m, c):
                             return m * x + c
 
-                        x_left = df_calib['water_left_ml'].values.astype(float)
-                        x_right = df_calib['water_right_ml'].values.astype(float)
+
+                        x_left = df_calib['water_left_ml'].values.astype(float) / df_calib['number_of_pulses'].values.astype(float)
+                        x_right = df_calib['water_right_ml'].values.astype(float) / df_calib['number_of_pulses'].values.astype(float)
                         y_time = df_calib['pump_time_ms'].values.astype(float)
 
                         # Fit Left
@@ -550,21 +551,21 @@ with tab_calib:
                             col_res2.warning("Right: Not enough data")
 
                         # plotting
-                        st.subheader("Curve Fit")
+                        st.subheader("Curve Fit (Single Pulse)")
                         fig, ax = plt.subplots(figsize=(6, 4))
                         
                         # Plot raw data
-                        ax.scatter(x_left, y_time, color='blue', label='Left Data', alpha=0.6)
-                        ax.scatter(x_right, y_time, color='red', label='Right Data', alpha=0.6)
+                        ax.scatter(x_left * 1000, y_time, color='blue', label='Left Data', alpha=0.6)
+                        ax.scatter(x_right * 1000, y_time, color='red', label='Right Data', alpha=0.6)
                         
                         # Plot fits
                         x_plot = np.linspace(0, max(x_left.max(), x_right.max()) * 1.1, 50)
                         if valid_l:
-                            ax.plot(x_plot, func_linear(x_plot, *popt_l), 'b--', alpha=0.5, label='Left Fit')
+                            ax.plot(x_plot * 1000, func_linear(x_plot, *popt_l), 'b--', alpha=0.5, label='Left Fit')
                         if valid_r:
-                            ax.plot(x_plot, func_linear(x_plot, *popt_r), 'r--', alpha=0.5, label='Right Fit')
+                            ax.plot(x_plot * 1000, func_linear(x_plot, *popt_r), 'r--', alpha=0.5, label='Right Fit')
                             
-                        ax.set_xlabel('Water Volume (ml)')
+                        ax.set_xlabel('Water Volume per Pulse (µl)')
                         ax.set_ylabel('Pump Time (ms)')
                         ax.legend()
                         ax.grid(True, linestyle=':', alpha=0.6)
