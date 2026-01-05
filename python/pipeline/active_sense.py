@@ -159,7 +159,7 @@ class DailyLog(dj.Manual):
             total_consumed = bottle_consumed + prev_task
             
             # Update the record (DataJoint pattern: fetch, delete, re-insert)
-            restriction = key & {'log_date': prev_date}
+            restriction = {'animal_id': animal_id, 'log_date': prev_date}
             record = (DailyLog & restriction).fetch1()
             (DailyLog & restriction).delete_quick()
             record['water_consumed_ml'] = total_consumed
