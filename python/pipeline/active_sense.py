@@ -158,8 +158,12 @@ class DailyLog(dj.Manual):
             bottle_consumed = max(0, prev_after - float(current_bottle_before_g))
             total_consumed = bottle_consumed + prev_task
             
-            # Update the record
-            dj.Table._update(DailyLog & key & {'log_date': prev_date}, 'water_consumed_ml', total_consumed)
+            # Update the record (DataJoint pattern: fetch, delete, re-insert)
+            restriction = key & {'log_date': prev_date}
+            record = (DailyLog & restriction).fetch1()
+            (DailyLog & restriction).delete_quick()
+            record['water_consumed_ml'] = total_consumed
+            DailyLog.insert1(record)
             return True, prev_date, total_consumed
             
         return False, None, 0.0
